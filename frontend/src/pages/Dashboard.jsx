@@ -6,6 +6,7 @@ import Analytics from '../components/Analytics'
 import QAChat from '../components/QAChat'
 import { analyzeIncident } from '../services/api'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { generatePDF } from '../utils/pdfExport'
 
 /**
  * Dashboard Page
@@ -13,6 +14,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
  */
 const Dashboard = () => {
   const [analysis, setAnalysis] = useState(null)
+  const [currentIncident, setCurrentIncident] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [historyRefresh, setHistoryRefresh] = useState(0)
@@ -27,6 +29,7 @@ const Dashboard = () => {
       const result = await analyzeIncident(reportText)
 
       setAnalysis(result.analysis)
+      setCurrentIncident(result)
       setSimilarIncidents(result.similar_incidents || [])
 
       // Trigger history refresh
@@ -61,23 +64,19 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
       {/* Header */}
-      <header className="bg-white shadow-lg sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <header className="bg-white/70 backdrop-blur-md shadow-sm sticky top-0 z-50 border-b border-slate-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">
+            <a href="/" className="block hover:opacity-80 transition-opacity">
+              <h1 className="text-2xl font-bold tracking-tight text-slate-800">
                 🚗 Incident Report Analyzer
               </h1>
-              <p className="text-gray-600 text-sm mt-1">
+              <p className="text-slate-500 text-sm mt-1 font-medium">
                 AI-Powered Analysis for Transportation Safety
               </p>
-            </div>
-            <div className="text-right">
-              <p className="text-gray-600 text-sm">Transportation Domain</p>
-              <p className="text-gray-600 text-sm">Powered by OpenAI & FAISS</p>
-            </div>
+            </a>
           </div>
         </div>
       </header>
@@ -102,39 +101,42 @@ const Dashboard = () => {
         )}
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-6 border-b border-gray-300">
+        <div className="flex gap-2 mb-8 bg-white/50 p-1.5 rounded-2xl w-fit shadow-sm border border-slate-100">
           <button
             onClick={() => setActiveTab('analyze')}
-            className={`px-4 py-3 font-semibold transition border-b-2 ${activeTab === 'analyze'
-                ? 'text-blue-600 border-blue-600'
-                : 'text-gray-600 border-transparent hover:text-blue-500'
+            className={`px-5 py-2.5 rounded-xl font-medium transition-all duration-200 ${activeTab === 'analyze'
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
               }`}
           >
             📊 Analyze
           </button>
+
           <button
             onClick={() => setActiveTab('history')}
-            className={`px-4 py-3 font-semibold transition border-b-2 ${activeTab === 'history'
-                ? 'text-blue-600 border-blue-600'
-                : 'text-gray-600 border-transparent hover:text-blue-500'
+            className={`px-5 py-2.5 rounded-xl font-medium transition-all duration-200 ${activeTab === 'history'
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
               }`}
           >
             📚 History
           </button>
+          
           <button
             onClick={() => setActiveTab('analytics')}
-            className={`px-4 py-3 font-semibold transition border-b-2 ${activeTab === 'analytics'
-                ? 'text-blue-600 border-blue-600'
-                : 'text-gray-600 border-transparent hover:text-blue-500'
+            className={`px-5 py-2.5 rounded-xl font-medium transition-all duration-200 ${activeTab === 'analytics'
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
               }`}
           >
             📈 Analytics
           </button>
+          
           <button
             onClick={() => setActiveTab('chat')}
-            className={`px-4 py-3 font-semibold transition border-b-2 ${activeTab === 'chat'
-                ? 'text-blue-600 border-blue-600'
-                : 'text-gray-600 border-transparent hover:text-blue-500'
+            className={`px-5 py-2.5 rounded-xl font-medium transition-all duration-200 ${activeTab === 'chat'
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
               }`}
           >
             🤖 Ask AI
@@ -155,8 +157,20 @@ const Dashboard = () => {
             )}
 
             {/* Results Section */}
-            {!loading && analysis && (
+            {!loading && analysis && currentIncident && (
               <div id="results">
+                <div className="flex justify-between items-center mb-6 px-2">
+                  <h2 className="text-2xl font-bold tracking-tight text-slate-800">
+                    Incident Report <span className="text-slate-400 font-mono text-xl">#{currentIncident.id}</span>
+                  </h2>
+                  <button
+                    onClick={() => generatePDF(currentIncident)}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl transition-colors shadow-sm"
+                  >
+                    <span>📄</span> Download PDF
+                  </button>
+                </div>
+
                 <AnalysisResult
                   analysis={analysis}
                   loading={false}
@@ -167,10 +181,11 @@ const Dashboard = () => {
 
             {/* Empty State */}
             {!loading && !analysis && !error && (
-              <div className="bg-white rounded-lg shadow-lg p-12 text-center">
-                <p className="text-gray-500 text-lg mb-2">No analysis yet</p>
-                <p className="text-gray-400">
-                  Submit an incident report above to get started
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-16 text-center">
+                <div className="text-4xl mb-4">📝</div>
+                <p className="text-slate-800 font-semibold text-lg mb-2">No analysis yet</p>
+                <p className="text-slate-500">
+                  Submit an incident report above to receive an AI-powered breakdown
                 </p>
               </div>
             )}
@@ -191,9 +206,9 @@ const Dashboard = () => {
       </main>
 
       {/* Footer */}
-      <footer className="bg-gray-800 text-gray-300 py-6 mt-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <p className="text-sm">
+      <footer className="bg-slate-900 text-slate-400 py-8 mt-16 border-t border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-sm font-medium tracking-wide">
+          <p>
             © 2026 Incident Report Analyzer. Gen AI Application for Transportation Safety.
           </p>
         </div>

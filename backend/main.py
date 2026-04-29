@@ -6,7 +6,7 @@ Production-ready without Docker dependency.
 import logging
 import os
 import json
-from typing import List
+from typing import List, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException, status
@@ -17,7 +17,7 @@ import numpy as np
 
 from config import settings
 from database import get_db, init_db, SessionLocal
-from models import Incident
+from models import Incident, User
 from schemas import (
     AnalysisRequest, AnalysisResponse, IncidentHistory, 
     AnalyticsData, ErrorResponse, ChatRequest, ChatResponse
@@ -133,6 +133,10 @@ app.add_middleware(
 )
 
 
+# ==================== Dependencies ====================
+
+# Authentication has been removed. 
+
 # ==================== Helper Functions ====================
 
 def parse_embedding_json(embedding_json) -> np.ndarray:
@@ -159,6 +163,8 @@ async def health_check():
         "version": "1.0.0"
     }
 
+
+# ==================== Incident Endpoints ====================
 
 @app.post("/api/analyze", response_model=AnalysisResponse)
 async def analyze_incident(
@@ -221,7 +227,9 @@ async def analyze_incident(
         incident = Incident(
             report_text=request.report_text,
             analysis=analysis,
-            embedding=json.dumps(embedding.tolist())
+            embedding=json.dumps(embedding.tolist()),
+            latitude=analysis.get("latitude"),
+            longitude=analysis.get("longitude")
         )
         db.add(incident)
         db.commit()
@@ -284,6 +292,8 @@ async def analyze_incident(
 async def get_history(
     limit: int = 20,
     offset: int = 0,
+    search: Optional[str] = None,
+    date: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -305,8 +315,19 @@ async def get_history(
             offset = 0
         
         # Query incidents
-        incidents = db.query(Incident)\
-            .order_by(Incident.created_at.desc())\
+        query = db.query(Incident)
+        
+        if search:
+            search_term = f"%{search.lower()}%"
+            from sqlalchemy import func
+            # Support searching both the report text and the analysis root cause/category
+            query = query.filter(func.lower(Incident.report_text).like(search_term))
+            
+        if date:
+            from sqlalchemy import func
+            query = query.filter(func.date(Incident.created_at) == date)
+            
+        incidents = query.order_by(Incident.created_at.desc())\
             .offset(offset)\
             .limit(limit)\
             .all()
@@ -321,6 +342,8 @@ async def get_history(
                 category=inc.analysis.get("category", "Uncategorized"),
                 severity=inc.analysis.get("severity", "Unknown"),
                 root_cause=inc.analysis.get("root_cause", "Unknown"),
+                incident_date=inc.analysis.get("incident_date", "Unknown"),
+                incident_location=inc.analysis.get("incident_location", "Unknown"),
                 created_at=inc.created_at
             )
             for inc in incidents
@@ -433,7 +456,9 @@ async def get_analytics(
             "Low": 0
         }
         category_count = {}
+        location_count = {}
         daily_counts = {}
+        locations_list = []
         
         for incident in incidents:
             severity = incident.analysis.get("severity", "Unknown")
@@ -443,20 +468,44 @@ async def get_analytics(
             category = incident.analysis.get("category", "Uncategorized")
             category_count[category] = category_count.get(category, 0) + 1
             
-            # Aggregate by date strictly (YYYY-MM-DD)
-            date_str = incident.created_at.strftime("%Y-%m-%d") if incident.created_at else "Unknown"
+            location = incident.analysis.get("incident_location", "Unknown")
+            location_count[location] = location_count.get(location, 0) + 1
+            
+            # Extract coordinates for map
+            lat = incident.latitude if hasattr(incident, 'latitude') else incident.analysis.get("latitude")
+            lng = incident.longitude if hasattr(incident, 'longitude') else incident.analysis.get("longitude")
+            
+            if lat is not None and lng is not None:
+                locations_list.append({
+                    "id": incident.id,
+                    "latitude": float(lat),
+                    "longitude": float(lng),
+                    "severity": severity,
+                    "category": category,
+                    "report_text": incident.report_text[:100] + "..." if len(incident.report_text) > 100 else incident.report_text
+                })
+            
+            # Aggregate by actual incident date if available
+            date_str = incident.analysis.get("incident_date")
+            if not date_str or str(date_str).lower() == "unknown":
+                date_str = incident.created_at.strftime("%Y-%m-%d") if incident.created_at else "Unknown"
+            else:
+                date_str = str(date_str).split('T')[0]
+                
             daily_counts[date_str] = daily_counts.get(date_str, 0) + 1
             
         # Format the time series data for recharts
         time_series_data = [{"date": k, "count": v} for k, v in sorted(daily_counts.items())]
         
-        logger.info(f"Analytics: total={total}, distribution={severity_count}, categories={category_count}")
+        logger.info(f"Analytics: total={total}, distribution={severity_count}, categories={category_count}, locations={location_count}")
         
         return AnalyticsData(
             total_incidents=total,
             severity_distribution=severity_count,
             category_distribution=category_count,
+            location_distribution=location_count,
             incidents_over_time=time_series_data,
+            incidents_with_location=locations_list,
             critical_count=severity_count["Critical"],
             high_count=severity_count["High"],
             medium_count=severity_count["Medium"],
@@ -472,22 +521,63 @@ async def get_analytics(
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat_with_data(request: ChatRequest):
+async def chat_with_data(
+    request: ChatRequest,
+    db: Session = Depends(get_db)
+):
     """
     Ask a natural language question about historical incident data.
     Uses RAG to find relevant incidents and generate an answer based ONLY on that data.
     """
     try:
         query = request.query
-        logger.info(f"Received chat query: {query}")
+        history = [{"role": msg.role, "content": msg.content} for msg in request.history]
+        logger.info(f"Received chat query: {query} with {len(history)} history messages")
         
-        # 1. Get embedding for the user's question
+        # 0. If the query is short or relative ("what about the first one?"), 
+        # append some context from the prior history to improve embedding retrieval.
+        search_query = query
+        if len(history) > 0 and len(query.split()) < 10:
+            last_bot_msg = next((m['content'] for m in reversed(history) if m['role'] == 'assistant'), None)
+            if last_bot_msg:
+                # Truncate last assistant message to essential keywords to guide vector search
+                context_hint = last_bot_msg[:200]
+                search_query = f"{query}. Context: {context_hint}"
+                logger.debug(f"Enhanced search query for vector retrieval: {search_query}")
+
+        # 1. Get embedding for the user's enhanced question
         logger.debug("Generating embedding for chat query...")
-        embedding = embedding_service.generate_embedding(query)
+        embedding = embedding_service.generate_embedding(search_query)
         
         # 2. Search FAISS for relevant past incidents
         logger.debug("Searching FAISS for context...")
         relevant_incidents = rag_service.search_similar_incidents(embedding)
+        
+        # 2.5 Also check for explicit incident IDs in the query
+        import re
+        explicit_ids = [int(m) for m in re.findall(r'(?:incident|report|id|#)\s*(?:number\s*)?#?\s*(\d+)', query.lower())]
+        if explicit_ids:
+            logger.info(f"Detected explicit incident IDs in query: {explicit_ids}")
+            # Filter out IDs already in relevant_incidents to avoid duplicates
+            existing_ids = {inc.get("incident_id") for inc in relevant_incidents}
+            missing_ids = [i for i in explicit_ids if i not in existing_ids][:3] # Max 3 to fit constraints
+            
+            if missing_ids:
+                # Fetch missing explicit incidents from DB
+                db_incidents = db.query(Incident).filter(Incident.id.in_(missing_ids)).all()
+                for i, db_inc in enumerate(db_incidents):
+                    logger.info(f"Adding explicitly requested incident {db_inc.id} to context")
+                    # Analysis might be missing on older records, fallback
+                    analysis_data = db_inc.analysis or {}
+                    relevant_incidents.insert(i, {
+                        "incident_id": db_inc.id,
+                        "report_text": db_inc.report_text,
+                        "analysis": analysis_data,
+                        "similarity_score": 1.0  # Max score for explicit requests
+                    })
+                    
+        # Limit total chunks to RAG_TOP_K * 2 to avoid token limits
+        relevant_incidents = relevant_incidents[:10]
         
         # 3. Format context sources for the response
         sources = []
@@ -495,12 +585,40 @@ async def chat_with_data(request: ChatRequest):
             sources.append({
                 "id": incident.get("incident_id"),
                 "similarity": incident.get("similarity_score"),
-                "category": incident.get("analysis", {}).get("category", "Unknown")
+                "category": incident.get("analysis", {}).get("category", "Unknown"),
+                "report_text": incident.get("report_text", ""),
+                "analysis": incident.get("analysis", {})
             })
             
-        # 4. Ask LLM to answer the question using the context
+        # 4. Ask LLM to answer the question using the context and history
         logger.debug("Generating answer with LLM...")
-        answer = llm_service.answer_question_with_context(query, relevant_incidents)
+        answer = llm_service.answer_question_with_context(query, relevant_incidents, history=history)
+        
+        # 5. Check if the LLM deemed the query irrelevant to the context
+        if answer.startswith("[IRRELEVANT]"):
+            answer = answer.replace("[IRRELEVANT]", "").strip()
+            sources = [] # Clear sources so cards don't render for greetings
+            logger.info("Query deemed irrelevant to specific incidents; clearing sources list.")
+        else:
+            # Parse SOURCES: [...] from the answer
+            import re
+            sources_match = re.search(r'SOURCES:\s*\[(.*?)\]', answer)
+            if sources_match:
+                try:
+                    ids_str = sources_match.group(1)
+                    if ids_str.strip():
+                        used_ids = {int(i.strip()) for i in ids_str.split(',') if i.strip().isdigit()}
+                    else:
+                        used_ids = set()
+                    
+                    # Filter sources to only include those actually used by the LLM
+                    sources = [s for s in sources if s['id'] in used_ids]
+                    logger.info(f"LLM indicated it used specific incident IDs: {used_ids}. Filtering sources.")
+                    
+                    # Remove the SOURCES: [...] line from the final answer
+                    answer = re.sub(r'\n*SOURCES:\s*\[.*?\]\s*', '', answer).strip()
+                except Exception as e:
+                    logger.warning(f"Failed to parse SOURCES from LLM answer: {e}")
         
         return ChatResponse(
             answer=answer,

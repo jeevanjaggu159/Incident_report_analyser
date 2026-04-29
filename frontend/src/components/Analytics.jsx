@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { getAnalytics } from '../services/api'
 import LoadingSpinner from './LoadingSpinner'
+import IncidentMap from './IncidentMap'
 import {
   PieChart, Pie, Cell,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -68,17 +69,19 @@ const Analytics = () => {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <h2 className="text-2xl font-bold text-gray-900">📊 Advanced Analytics Dashboard</h2>
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 mb-8">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
+          <span>📊</span> Advanced Analytics Dashboard
+        </h2>
 
         <div className="flex items-center space-x-4">
-          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-            <span className="text-gray-600 text-sm font-medium mr-2">Timeframe:</span>
+          <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 hover:bg-slate-100 transition-colors">
+            <span className="text-slate-500 text-xs font-bold uppercase tracking-wider mr-3">Timeframe:</span>
             <select
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value)}
-              className="bg-transparent border-none text-gray-800 text-sm focus:ring-0 cursor-pointer outline-none"
+              className="bg-transparent border-none text-slate-800 font-medium text-sm focus:ring-0 cursor-pointer outline-none"
             >
               <option value="all">All Time</option>
               <option value="7days">Last 7 Days</option>
@@ -89,9 +92,9 @@ const Analytics = () => {
 
           <button
             onClick={fetchAnalytics}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition shadow-sm"
+            className="px-5 py-2.5 bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold rounded-xl transition-colors shadow-sm flex items-center gap-2"
           >
-            🔄 Refresh Data
+            <span>🔄</span> Refresh Data
           </button>
         </div>
       </div>
@@ -103,43 +106,48 @@ const Analytics = () => {
       )}
 
       {/* Total Incidents Card */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-        <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg p-6 text-white">
-          <div className="text-3xl font-bold">{analytics.total_incidents}</div>
-          <div className="text-sm opacity-90">Total Incidents</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5 mb-10">
+        <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 text-white shadow-md shadow-slate-900/10">
+          <div className="text-4xl font-black tracking-tight mb-1">{analytics.total_incidents}</div>
+          <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Total Incidents</div>
         </div>
 
         {/* Critical Badge */}
-        <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-lg p-6 text-white">
-          <div className="text-3xl font-bold">{analytics.critical_count}</div>
-          <div className="text-sm opacity-90">🚨 Critical</div>
+        <div className="bg-gradient-to-br from-red-50 to-white border border-red-100 rounded-2xl p-6 text-slate-800 shadow-sm relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-16 h-16 bg-red-100 rounded-bl-full -mr-8 -mt-8 opacity-50"></div>
+          <div className="text-4xl font-black tracking-tight mb-1 text-red-600">{analytics.critical_count}</div>
+          <div className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5"><span className="text-[10px]">🚨</span> Critical</div>
         </div>
 
         {/* High Badge */}
-        <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg p-6 text-white">
-          <div className="text-3xl font-bold">{analytics.high_count}</div>
-          <div className="text-sm opacity-90">⚠️ High</div>
+        <div className="bg-gradient-to-br from-orange-50 to-white border border-orange-100 rounded-2xl p-6 text-slate-800 shadow-sm relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-16 h-16 bg-orange-100 rounded-bl-full -mr-8 -mt-8 opacity-50"></div>
+          <div className="text-4xl font-black tracking-tight mb-1 text-orange-600">{analytics.high_count}</div>
+          <div className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5"><span className="text-[10px]">⚠️</span> High</div>
         </div>
 
         {/* Medium Badge */}
-        <div className="bg-gradient-to-br from-yellow-500 to-yellow-600 rounded-lg p-6 text-gray-900">
-          <div className="text-3xl font-bold">{analytics.medium_count}</div>
-          <div className="text-sm opacity-90">⚡ Medium</div>
+        <div className="bg-gradient-to-br from-yellow-50 to-white border border-yellow-100 rounded-2xl p-6 text-slate-800 shadow-sm relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-16 h-16 bg-yellow-100 rounded-bl-full -mr-8 -mt-8 opacity-50"></div>
+          <div className="text-4xl font-black tracking-tight mb-1 text-yellow-600">{analytics.medium_count}</div>
+          <div className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5"><span className="text-[10px]">⚡</span> Medium</div>
         </div>
 
         {/* Low Badge */}
-        <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-lg p-6 text-white">
-          <div className="text-3xl font-bold">{analytics.low_count}</div>
-          <div className="text-sm opacity-90">✓ Low</div>
+        <div className="bg-gradient-to-br from-green-50 to-white border border-green-100 rounded-2xl p-6 text-slate-800 shadow-sm relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-16 h-16 bg-green-100 rounded-bl-full -mr-8 -mt-8 opacity-50"></div>
+          <div className="text-4xl font-black tracking-tight mb-1 text-green-600">{analytics.low_count}</div>
+          <div className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5"><span className="text-[10px]">✓</span> Low</div>
         </div>
       </div>
 
       {/* Advanced Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
 
+
         {/* Severity Pie Chart */}
-        <div className="bg-gray-50 rounded-lg p-6 border border-gray-100 shadow-sm">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">Severity Distribution</h3>
+        <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
+          <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-6 text-center">Severity Distribution</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -170,8 +178,8 @@ const Analytics = () => {
         </div>
 
         {/* Category Bar Chart */}
-        <div className="bg-gray-50 rounded-lg p-6 border border-gray-100 shadow-sm">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">Incidents by Category</h3>
+        <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
+          <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-6 text-center">Incidents by Category</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
@@ -188,22 +196,40 @@ const Analytics = () => {
           </div>
         </div>
 
-        {/* Incidents Over Time Line Chart */}
-        <div className="bg-gray-50 rounded-lg p-6 border border-gray-100 shadow-sm lg:col-span-2">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">Incident Trend Over Time</h3>
-          <div className="h-72">
+        {/* Incidents by Location Bar Chart */}
+        <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
+          <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-6 text-center">Incidents by Location</h3>
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart
+              <BarChart
+                data={Object.entries(analytics.location_distribution || {}).map(([name, value]) => ({ name, value }))}
+                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                <YAxis allowDecimals={false} />
+                <RechartsTooltip cursor={{ fill: 'transparent' }} />
+                <Bar dataKey="value" fill="#10B981" radius={[4, 4, 0, 0]} name="Incidents" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Incidents by Date Bar Chart */}
+        <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
+          <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-6 text-center">Incidents by Date</h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
                 data={analytics.incidents_over_time || []}
                 margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
+                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                 <YAxis allowDecimals={false} />
-                <RechartsTooltip />
-                <Legend />
-                <Line type="monotone" dataKey="count" name="Incidents Reported" stroke="#8B5CF6" activeDot={{ r: 8 }} strokeWidth={2} />
-              </LineChart>
+                <RechartsTooltip cursor={{ fill: 'transparent' }} />
+                <Bar dataKey="count" fill="#8B5CF6" radius={[4, 4, 0, 0]} name="Incidents Reported" />
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </div>

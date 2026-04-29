@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.3  # Lower temp uses fewer tokens typically
     
     # Max output tokens (balance detail vs. token usage)
-    LLM_MAX_TOKENS: int = 800  # Reduced from 1000 to optimize free tier usage
+    LLM_MAX_TOKENS: int = 2000  # Increased to prevent truncated JSON responses
     
     # Free tier retry configuration
     FREE_TIER_MAX_RETRIES: int = 5  # Retry attempts on rate limit

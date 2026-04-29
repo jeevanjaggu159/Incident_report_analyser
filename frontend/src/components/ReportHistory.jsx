@@ -4,8 +4,7 @@ import SeverityBadge from './SeverityBadge'
 import LoadingSpinner from './LoadingSpinner'
 import AnalysisResult from './AnalysisResult'
 import { formatDistanceToNow } from 'date-fns'
-import jsPDF from 'jspdf'
-import autoTable from 'jspdf-autotable'
+import { generatePDF } from '../utils/pdfExport'
 
 /**
  * ReportHistory Component
@@ -17,6 +16,10 @@ const ReportHistory = ({ refreshTrigger }) => {
   const [error, setError] = useState('')
   const [currentPage, setCurrentPage] = useState(0)
   const itemsPerPage = 10
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [searchDate, setSearchDate] = useState('')
+  const [searchDateInput, setSearchDateInput] = useState('')
 
   const [selectedIncident, setSelectedIncident] = useState(null)
   const [loadingDetails, setLoadingDetails] = useState(false)
@@ -41,13 +44,15 @@ const ReportHistory = ({ refreshTrigger }) => {
   const exportToCSV = () => {
     if (history.length === 0) return
 
-    const headers = ['ID', 'Category', 'Report Text', 'Root Cause', 'Severity', 'Date']
+    const headers = ['ID', 'Category', 'Location', 'Incident Date', 'Report Text', 'Root Cause', 'Severity', 'Date Entered']
     const csvRows = [headers.join(',')]
 
     history.forEach(incident => {
       const row = [
         `#${incident.id}`,
         `"${(incident.category || 'Uncategorized').replace(/"/g, '""')}"`,
+        `"${(incident.incident_location || 'Unknown').replace(/"/g, '""')}"`,
+        `"${(incident.incident_date || 'Unknown').replace(/"/g, '""')}"`,
         `"${incident.report_text.replace(/"/g, '""')}"`,
         `"${incident.root_cause.replace(/"/g, '""')}"`,
         incident.severity,
@@ -69,100 +74,18 @@ const ReportHistory = ({ refreshTrigger }) => {
   }
 
   const downloadPDF = () => {
-    if (!selectedIncident) return
-
-    try {
-      const doc = new jsPDF()
-
-      // Title
-      doc.setFontSize(22)
-      doc.setTextColor(40, 40, 40)
-      doc.text(`Incident Report #${selectedIncident.id}`, 14, 20)
-
-      // Meta data
-      doc.setFontSize(10)
-      doc.setTextColor(100, 100, 100)
-      doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 28)
-
-      // Original Report Section
-      doc.setFontSize(14)
-      doc.setTextColor(40, 40, 40)
-      doc.text('Original Report', 14, 40)
-
-      doc.setFontSize(11)
-      doc.setTextColor(60, 60, 60)
-      const splitReport = doc.splitTextToSize(selectedIncident.report_text, 180)
-      doc.text(splitReport, 14, 48)
-
-      let currentY = 48 + (splitReport.length * 5) + 10
-
-      // Analysis Section
-      doc.setFontSize(14)
-      doc.setTextColor(40, 40, 40)
-      doc.text('AI Analysis Summary', 14, currentY)
-
-      const analysisInfo = [
-        ['Category', selectedIncident.analysis.category || 'Uncategorized'],
-        ['Severity', selectedIncident.analysis.severity],
-        ['Root Cause', selectedIncident.analysis.root_cause]
-      ]
-
-      autoTable(doc, {
-        startY: currentY + 5,
-        head: [['Attribute', 'Details']],
-        body: analysisInfo,
-        theme: 'grid',
-        headStyles: { fillColor: [66, 135, 245] }
-      })
-
-      currentY = doc.lastAutoTable.finalY + 15
-
-      // Contributing Factors
-      if (selectedIncident.analysis.contributing_factors?.length) {
-        doc.setFontSize(14)
-        doc.text('Contributing Factors', 14, currentY)
-        const factors = selectedIncident.analysis.contributing_factors.map(f => [f])
-
-        autoTable(doc, {
-          startY: currentY + 5,
-          body: factors,
-          theme: 'plain',
-          styles: { cellPadding: 2, fontSize: 11, textColor: [80, 80, 80] }
-        })
-        currentY = doc.lastAutoTable.finalY + 10
-      }
-
-      // Prevention Measures
-      if (selectedIncident.analysis.prevention_measures?.length) {
-        doc.setFontSize(14)
-        doc.text('Prevention Measures', 14, currentY)
-        const measures = selectedIncident.analysis.prevention_measures.map(m => [m])
-
-        autoTable(doc, {
-          startY: currentY + 5,
-          body: measures,
-          theme: 'plain',
-          styles: { cellPadding: 2, fontSize: 11, textColor: [20, 120, 40] }
-        })
-      }
-
-      // Save PDF using native jsPDF method
-      doc.save(`incident_${selectedIncident.id}_report.pdf`)
-    } catch (err) {
-      console.error("PDF Generate Error:", err)
-      alert("Failed to generate PDF: " + err.message)
-    }
+    generatePDF(selectedIncident)
   }
 
   useEffect(() => {
     fetchHistory()
-  }, [refreshTrigger, currentPage])
+  }, [refreshTrigger, currentPage, searchQuery, searchDate])
 
   const fetchHistory = async () => {
     try {
       setLoading(true)
       setError('')
-      const data = await getHistory(itemsPerPage, currentPage * itemsPerPage)
+      const data = await getHistory(itemsPerPage, currentPage * itemsPerPage, searchQuery, searchDate)
       setHistory(data)
     } catch (err) {
       setError('Failed to load history')
@@ -195,23 +118,70 @@ const ReportHistory = ({ refreshTrigger }) => {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">📚 Analysis History</h2>
-        {history.length > 0 && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              exportToCSV()
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 mb-8">
+      <div className="flex justify-between items-center mb-8">
+        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
+          <span>📚</span> Analysis History
+        </h2>
+
+        <div className="flex items-center gap-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setCurrentPage(0);
+              setSearchQuery(searchInput);
+              setSearchDate(searchDateInput);
             }}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg shadow transition"
+            className="flex gap-2"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            Export to CSV
-          </button>
-        )}
+            <div className="relative group">
+              <input
+                type="date"
+                value={searchDateInput}
+                title="Filter by Date Analyzed"
+                onChange={(e) => setSearchDateInput(e.target.value)}
+                className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 w-40 text-slate-700 font-medium transition-all"
+              />
+            </div>
+            <input
+              type="text"
+              placeholder="Search place, text..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 w-64 text-slate-700 placeholder-slate-400 transition-all shadow-sm"
+            />
+            <button type="submit" className="px-5 py-2 bg-blue-600 text-white font-semibold rounded-xl text-sm hover:bg-blue-700 transition-all shadow-md shadow-blue-500/20">
+              Search
+            </button>
+            {(searchQuery || searchDate) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchInput('');
+                  setSearchQuery('');
+                  setSearchDateInput('');
+                  setSearchDate('');
+                  setCurrentPage(0);
+                }}
+                className="px-5 py-2 bg-slate-100 text-slate-600 font-semibold rounded-xl text-sm hover:bg-slate-200 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </form>
+
+          {history.length > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                exportToCSV();
+              }}
+              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-semibold rounded-xl transition-colors text-sm"
+            >
+              <span>📥</span> Export CSV
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -227,37 +197,41 @@ const ReportHistory = ({ refreshTrigger }) => {
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
+            <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b-2 border-gray-200">
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">ID</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Category</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Report</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Root Cause</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Severity</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Date</th>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">ID</th>
+                  <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Category</th>
+                  <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Location</th>
+                  <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Incident Date</th>
+                  <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Report</th>
+                  <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Severity</th>
+                  <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Date entered</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100 bg-white">
                 {history.map((incident) => (
                   <tr
                     key={incident.id}
-                    className="border-b border-gray-200 hover:bg-gray-50 transition cursor-pointer"
+                    className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
                     onClick={() => handleRowClick(incident.id)}
                   >
-                    <td className="px-4 py-3 text-sm text-gray-600 font-mono">#{incident.id}</td>
-                    <td className="px-4 py-3 text-sm text-gray-800 font-semibold">{incident.category || 'Uncategorized'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-800 truncate max-w-xs">
+                    <td className="px-5 py-4 text-sm text-slate-500 font-mono">#{incident.id}</td>
+                    <td className="px-5 py-4 text-sm text-slate-800 font-semibold">{incident.category || 'Uncategorized'}</td>
+                    <td className="px-5 py-4 text-sm text-slate-600 truncate max-w-[150px]">
+                      {incident.incident_location || 'Unknown'}
+                    </td>
+                    <td className="px-5 py-4 text-sm text-slate-600">
+                      {incident.incident_date || 'Unknown'}
+                    </td>
+                    <td className="px-5 py-4 text-sm text-slate-600 truncate max-w-[200px]">
                       {incident.report_text}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700 truncate max-w-xs">
-                      {incident.root_cause}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
+                    <td className="px-5 py-4 text-sm">
                       <SeverityBadge severity={incident.severity} />
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
+                    <td className="px-5 py-4 text-sm text-slate-500 whitespace-nowrap">
                       {formatDate(incident.created_at)}
                     </td>
                   </tr>
@@ -267,22 +241,22 @@ const ReportHistory = ({ refreshTrigger }) => {
           </div>
 
           {/* Pagination */}
-          <div className="mt-6 flex justify-between items-center">
-            <p className="text-sm text-gray-600">
+          <div className="mt-8 flex justify-between items-center">
+            <p className="text-sm text-slate-500 font-medium">
               Page {currentPage + 1} • Showing {Math.min(itemsPerPage, history.length)} incidents
             </p>
             <div className="flex gap-2">
               <button
                 onClick={handlePrevPage}
                 disabled={currentPage === 0}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 text-gray-800 font-semibold rounded-lg transition disabled:cursor-not-allowed"
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 disabled:bg-slate-50 disabled:text-slate-400 text-slate-700 font-bold rounded-xl transition-all disabled:cursor-not-allowed shadow-sm border border-slate-200"
               >
-                ← Previous
+                ← Prev
               </button>
               <button
                 onClick={handleNextPage}
                 disabled={history.length < itemsPerPage}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 text-gray-800 font-semibold rounded-lg transition disabled:cursor-not-allowed"
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 disabled:bg-slate-50 disabled:text-slate-400 text-slate-700 font-bold rounded-xl transition-all disabled:cursor-not-allowed shadow-sm border border-slate-200"
               >
                 Next →
               </button>
@@ -293,36 +267,33 @@ const ReportHistory = ({ refreshTrigger }) => {
 
       {/* Modal for Incident Details */}
       {(selectedIncident || loadingDetails) && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto relative">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-4xl max-h-[90vh] overflow-y-auto relative">
             <button
               onClick={closeModal}
-              className="absolute top-4 right-4 text-gray-500 hover:text-gray-700 font-bold text-2xl w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200"
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 font-bold text-2xl w-10 h-10 flex items-center justify-center rounded-full bg-slate-100/50 hover:bg-slate-100 transition-colors"
             >
               &times;
             </button>
             <div className="p-6">
               {loadingDetails ? (
-                <div className="py-12"><LoadingSpinner message="Loading incident details..." /></div>
+                <div className="py-24"><LoadingSpinner message="Loading incident details..." /></div>
               ) : selectedIncident && (
                 <>
-                  <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-xl font-bold">Incident #{selectedIncident.id} Report</h2>
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold tracking-tight text-slate-800">Incident Report <span className="text-slate-400 font-mono text-xl">#{selectedIncident.id}</span></h2>
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
                         downloadPDF()
                       }}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded shadow transition"
+                      className="flex items-center gap-2 px-5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-bold rounded-xl transition-colors"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                      Download PDF
+                      <span>📄</span> Download PDF
                     </button>
                   </div>
-                  <div className="p-4 bg-gray-50 rounded-lg mb-6 border border-gray-200">
-                    <p className="text-gray-800 whitespace-pre-wrap">{selectedIncident.report_text}</p>
+                  <div className="p-5 bg-slate-50/50 rounded-2xl mb-8 border border-slate-100 shadow-inner">
+                    <p className="text-slate-700 whitespace-pre-wrap leading-relaxed space-y-4">{selectedIncident.report_text}</p>
                   </div>
                   <AnalysisResult analysis={selectedIncident.analysis} similarIncidents={selectedIncident.similar_incidents} />
                 </>

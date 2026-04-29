@@ -1,13 +1,13 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import Dashboard from './pages/Dashboard'
+import Landing from './components/Landing'
 import { healthCheck } from './services/api'
 import './App.css'
 
 /**
- * App Component
- * Root component of the application
+ * App Content Component
  */
-function App() {
+function AppContent({ showDashboard, setShowDashboard }) {
   const [isConnected, setIsConnected] = React.useState(false)
   const [checkingConnection, setCheckingConnection] = React.useState(true)
 
@@ -68,7 +68,24 @@ function App() {
     )
   }
 
+  // If connected, show landing or dashboard based on state
+  if (!showDashboard) {
+    return <Landing onGetStarted={() => setShowDashboard(true)} />
+  }
+
   return <Dashboard />
+}
+
+/**
+ * App Component
+ * Root component of the application
+ */
+function App() {
+  const [showDashboard, setShowDashboard] = useState(false)
+
+  return (
+    <AppContent showDashboard={showDashboard} setShowDashboard={setShowDashboard} />
+  )
 }
 
 export default App

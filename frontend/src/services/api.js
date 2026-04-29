@@ -5,7 +5,7 @@ import axios from 'axios'
  * Handles all backend API communication
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
 // Create axios instance with default config
 const apiClient = axios.create({
@@ -14,26 +14,6 @@ const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
 })
-
-// Request interceptor for adding auth tokens if needed
-apiClient.interceptors.request.use(
-  (config) => {
-    // Add any auth headers here if needed
-    return config
-  },
-  (error) => {
-    return Promise.reject(error)
-  }
-)
-
-// Response interceptor for handling common errors
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    console.error('API Error:', error)
-    return Promise.reject(error)
-  }
-)
 
 /**
  * Analyze an incident report
@@ -47,7 +27,7 @@ export const analyzeIncident = async (reportText) => {
     })
     return response.data
   } catch (error) {
-    throw error.response?.data || error.message
+    throw error.response?.data || new Error(error.message)
   }
 }
 
@@ -57,14 +37,15 @@ export const analyzeIncident = async (reportText) => {
  * @param {number} offset - Number of records to skip
  * @returns {Promise} List of incidents
  */
-export const getHistory = async (limit = 20, offset = 0) => {
+export const getHistory = async (limit = 20, offset = 0, search = '', date = '') => {
   try {
-    const response = await apiClient.get('/api/history', {
-      params: { limit, offset },
-    })
+    const params = { limit, offset }
+    if (search) params.search = search
+    if (date) params.date = date
+    const response = await apiClient.get('/api/history', { params })
     return response.data
   } catch (error) {
-    throw error.response?.data || error.message
+    throw error.response?.data || new Error(error.message)
   }
 }
 
@@ -78,7 +59,7 @@ export const getIncident = async (incidentId) => {
     const response = await apiClient.get(`/api/incident/${incidentId}`)
     return response.data
   } catch (error) {
-    throw error.response?.data || error.message
+    throw error.response?.data || new Error(error.message)
   }
 }
 
@@ -97,7 +78,7 @@ export const getAnalytics = async (startDate, endDate) => {
     const response = await apiClient.get('/api/analytics', { params })
     return response.data
   } catch (error) {
-    throw error.response?.data || error.message
+    throw error.response?.data || new Error(error.message)
   }
 }
 
@@ -110,21 +91,22 @@ export const healthCheck = async () => {
     const response = await apiClient.get('/health')
     return response.data
   } catch (error) {
-    throw error.response?.data || error.message
+    throw error.response?.data || new Error(error.message)
   }
 }
 
 /**
  * Ask a question about the incident data (RAG)
  * @param {string} query - The user's question
+ * @param {Array} history - The conversation history array
  * @returns {Promise} AI generated answer and sources
  */
-export const askQuestion = async (query) => {
+export const askQuestion = async (query, history = []) => {
   try {
-    const response = await apiClient.post('/api/chat', { query })
+    const response = await apiClient.post('/api/chat', { query, history })
     return response.data
   } catch (error) {
-    throw error.response?.data || error.message
+    throw error.response?.data || new Error(error.message)
   }
 }
 

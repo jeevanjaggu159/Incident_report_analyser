@@ -7,6 +7,38 @@ from typing import List, Optional
 from datetime import datetime
 
 
+class Token(BaseModel):
+    """Schema for JWT token response."""
+    access_token: str
+    token_type: str
+
+
+class TokenData(BaseModel):
+    """Schema for data encoded in JWT."""
+    username: Optional[str] = None
+
+
+class UserBase(BaseModel):
+    username: str = Field(..., description="Unique username")
+
+
+class UserCreate(UserBase):
+    password: str = Field(..., description="Plain text password")
+
+
+class PasswordChangeRequest(BaseModel):
+    old_password: str = Field(..., description="Current password")
+    new_password: str = Field(..., description="New password")
+
+
+class User(UserBase):
+    id: int
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
 class AnalysisRequest(BaseModel):
     """Schema for incident analysis request."""
     report_text: str = Field(..., min_length=10, max_length=5000, 
@@ -27,6 +59,10 @@ class AnalysisResult(BaseModel):
     contributing_factors: List[str] = Field(..., description="List of contributing factors")
     severity: str = Field(..., description="Severity level: Critical, High, Medium, Low")
     prevention_measures: List[str] = Field(..., description="Recommended prevention measures")
+    incident_date: str = Field(default="Unknown", description="Actual date the incident occurred")
+    incident_location: str = Field(default="Unknown", description="Location where the incident occurred")
+    latitude: Optional[float] = Field(default=None, description="Estimated geographic latitude")
+    longitude: Optional[float] = Field(default=None, description="Estimated geographic longitude")
 
 
 class AnalysisResponse(BaseModel):
@@ -62,6 +98,10 @@ class IncidentHistory(BaseModel):
     category: str
     severity: str
     root_cause: str
+    incident_date: str = "Unknown"
+    incident_location: str = "Unknown"
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     created_at: datetime
     
     class Config:
@@ -88,9 +128,17 @@ class AnalyticsData(BaseModel):
         ..., 
         description="Count of incidents by category"
     )
+    location_distribution: dict = Field(
+        default={},
+        description="Count of incidents by location"
+    )
     incidents_over_time: List[dict] = Field(
         default=[],
         description="Time-series data of incident counts"
+    )
+    incidents_with_location: List[dict] = Field(
+        default=[],
+        description="List of incidents with valid coordinates for map display"
     )
     critical_count: int
     high_count: int
@@ -98,9 +146,14 @@ class AnalyticsData(BaseModel):
     low_count: int
 
 
+class ChatMessage(BaseModel):
+    role: str = Field(..., description="Role of the sender: 'user' or 'assistant'")
+    content: str = Field(..., description="The message content")
+
 class ChatRequest(BaseModel):
     """Schema for a RAG chat query."""
     query: str = Field(..., description="The user's question about the incident data")
+    history: List[ChatMessage] = Field(default=[], description="Previous conversation history")
 
 class ChatResponse(BaseModel):
     """Schema for the RAG chat answer."""

@@ -114,8 +114,35 @@ class LLMService:
                 content = response.text
                 logger.debug(f"LLM response: {content[:200]}...")
                 
+                # Clean up potential markdown formatting
+                clean_content = content.strip()
+                if clean_content.startswith("```json"):
+                    clean_content = clean_content[7:]
+                elif clean_content.startswith("```"):
+                    clean_content = clean_content[3:]
+                if clean_content.endswith("```"):
+                    clean_content = clean_content[:-3]
+                clean_content = clean_content.strip()
+                
                 # Parse JSON response
-                analysis = json.loads(content)
+                try:
+                    analysis = json.loads(clean_content, strict=False)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse JSON. Error: {e}")
+                    logger.error(f"Raw output causing error:\n{clean_content}")
+                    # Try a simple repair for truncated JSON
+                    if "Unterminated string" in str(e) or "Expecting" in str(e):
+                        try:
+                            logger.info("Attempting to repair truncated JSON...")
+                            analysis = json.loads(clean_content + '"]}', strict=False)
+                        except Exception:
+                            try:
+                                analysis = json.loads(clean_content + '"}', strict=False)
+                            except Exception:
+                                raise ValueError(f"LLM produced invalid JSON: {e} (Truncated?)")
+                        logger.info("Successfully repaired truncated JSON")
+                    else:
+                        raise ValueError(f"LLM produced invalid JSON: {e}")
                 
                 # Validate before caching
                 if self.validate_analysis_output(analysis):
@@ -175,17 +202,23 @@ Your task is to analyze incident and accident reports and provide structured ana
 
 Always respond with ONLY valid JSON in this exact format:
 {
-    "category": "string representing the type of incident (e.g., Vehicle Collision, Equipment Failure, Worker Injury, Environmental)",
+    "category": "string representing the type of incident (e.g., Vehicle Collision, Traffic Violation (No Helmet), Traffic Violation (No Seatbelt), Equipment Failure, Worker Injury, Environmental)",
     "root_cause": "string describing the primary root cause",
     "contributing_factors": ["factor1", "factor2", "factor3"],
     "severity": "one of: Critical, High, Medium, Low",
-    "prevention_measures": ["measure1", "measure2", "measure3"]
+    "prevention_measures": ["measure1", "measure2", "measure3"],
+    "incident_date": "string representing the actual date of the incident (e.g., 'YYYY-MM-DD' or 'Unknown' if not specified)",
+    "incident_location": "string representing where the incident occurred (e.g., 'Intersection of Main and Oak', 'Warehouse A', or 'Unknown')",
+    "latitude": 0.0,
+    "longitude": 0.0
 }
 
 Guidelines:
+- Estimate the approximate latitude and longitude coordinates based on the incident report. Provide as floats. If unknown, return null.
 - Severity levels: Critical (fatalities/major injuries), High (injuries present), 
   Medium (property damage, minor injuries), Low (near-miss, no injuries)
 - Be concise but comprehensive
+- Keep all text fields brief, under 3 sentences each, to avoid truncation
 - Focus on transportation industry terminology
 - Consider environmental, human, and mechanical factors
 - Return ONLY the JSON object, no additional text before or after it
@@ -284,13 +317,15 @@ Guidelines:
         self._cache_timestamps[cache_key] = time.time()
         logger.debug(f"Cached analysis result ({len(self._analysis_cache)}/{self._max_cache_size})")
     
-    def answer_question_with_context(self, question: str, context_incidents: List[Dict]) -> str:
+    def answer_question_with_context(self, question: str, context_incidents: List[Dict], history: List[Dict] = None) -> str:
         """
-        Answer a user question based strictly on the provided context incidents.
+        Answer a user question based strictly on the provided context incidents,
+        incorporating previous conversation history if available.
         
         Args:
             question: The user's natural language question.
             context_incidents: A list of relevant past incidents from FAISS.
+            history: Optional list of previous chat messages.
             
         Returns:
             A string containing the AI's answer.
@@ -299,7 +334,8 @@ Guidelines:
             # Format context
             context_text = ""
             for idx, incident in enumerate(context_incidents):
-                context_text += f"\n--- Incident {idx+1} ---"
+                incident_id = incident.get('incident_id', 'Unknown')
+                context_text += f"\n--- Incident #{incident_id} ---"
                 context_text += f"\nReport: {incident.get('report_text', 'N/A')}"
                 analysis = incident.get('analysis', {})
                 context_text += f"\nSeverity: {analysis.get('severity', 'Unknown')}"
@@ -307,26 +343,44 @@ Guidelines:
                 context_text += f"\nRoot Cause: {analysis.get('root_cause', 'Unknown')}\n"
 
             system_prompt = f"""You are a specialized Safety Data Analyst API.
-Your job is to answer the user's question using ONLY the provided historical incident data.
+Your job is to answer the user's question.
 
 Here is the context (past incident reports matching their query):
 {context_text}
 
 Rules:
-1. Base your answer STRICTLY on the provided context.
-2. If the context does not contain enough information to answer the question, say so politely. Do not make up answers or use outside knowledge.
-3. Be concise, analytical, and professional.
-4. You may summarize trends if multiple incidents show the same root cause or category.
+1. If the user's question is a greeting (e.g., "Hello", "Hi") or completely unrelated to transportation safety or incident reports, answer them politely and generally. Example: "Hello! I am the Incident Report Analyzer AI. How can I help you regarding safety data today?"
+2. If the user is asking about incident data, base your answer STRICTLY on the provided context. If it's a follow-up question, use the conversation history to understand what the user is referring to.
+3. If the user asks about incidents but the context does not contain enough information, say so politely. Do not make up answers or use outside knowledge.
+4. Be concise, analytical, and professional.
+5. If the user asks to download, export, or view a PDF of an incident report, simply generate a brief response confirming the incident was found, and tell them they can click the 'Download PDF' button attached to the relevant incident source card below. Do NOT apologize or say you cannot generate files.
+6. CRITICAL: If the user's question was completely unrelated to the incidents (like a greeting), you MUST begin your response with the exact string `[IRRELEVANT]`.
+7. CRITICAL: At the very end of your response, on a new line, you MUST output a list of the incident IDs that you used to formulate your answer, in this exact format: `SOURCES: [1, 5, 12]`. If you did not use any specific incidents, output `SOURCES: []`.
 """
+            
+            # Format history for Gemini API
+            messages = []
+            if history:
+                import copy
+                for msg in history:
+                    # Map 'assistant' to 'model' for Gemini
+                    role = 'model' if msg.get('role') == 'assistant' else 'user'
+                    messages.append({"role": role, "parts": [msg.get('content', '')]})
+
+            # Add the current question to the messages array
+            messages.append({"role": "user", "parts": [question]})
+
             model = genai.GenerativeModel(
                 model_name=self.model_name,
                 system_instruction=system_prompt
             )
 
-            logger.info("Sending RAG question to LLM...")
+            logger.info("Sending RAG question (with history) to LLM...")
 
+            # Instead of passing just the string question, start a chat session if we have history
+            # or just generate_content with the messages array
             response = model.generate_content(
-                question,
+                messages,
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.3, # Low temp for factual RAG
                     max_output_tokens=settings.LLM_MAX_TOKENS
@@ -355,7 +409,11 @@ Rules:
             "root_cause": str,
             "contributing_factors": list,
             "severity": str,
-            "prevention_measures": list
+            "prevention_measures": list,
+            "incident_date": str,
+            "incident_location": str,
+            "latitude": (float, type(None)),
+            "longitude": (float, type(None))
         }
         
         for field, expected_type in required_fields.items():
